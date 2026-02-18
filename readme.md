@@ -1,10 +1,10 @@
 # Go Examples
 
-[![DOI](https://zenodo.org/badge/9459712.svg)](https://zenodo.org/badge/latestdoi/9459712)  
-[![Go Report Card](https://goreportcard.com/badge/github.com/simonwaldherr/golang-examples)](https://goreportcard.com/report/github.com/simonwaldherr/golang-examples)  
+[![DOI](https://zenodo.org/badge/9459712.svg)](https://zenodo.org/badge/latestdoi/9459712) 
+[![Go Report Card](https://goreportcard.com/badge/github.com/simonwaldherr/golang-examples)](https://goreportcard.com/report/github.com/simonwaldherr/golang-examples) 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)  
 
-NEW: now with an [online live editor with Golang support](https://simonwaldherr.github.io/golang-examples/). Try out and edit the examples directly in the browser:
+Use the [online live editor with Golang support](https://simonwaldherr.github.io/golang-examples/). Edit and run the examples directly in your browser:
 [![SimonWaldherr/golang-benchmarks Online Editor](https://simonwaldherr.github.io/golang-examples/golang-examples.png)](https://simonwaldherr.github.io/golang-examples/)  
 
 
@@ -256,7 +256,7 @@ From the root directory (`$GOPATH/github.com/SimonWaldherr/golang-examples`), ru
 go test -bench=. -benchmem advanced/json_bench/main_test.go
 ```
 
-Make pipeable unix applications with os.Stdin ([Golang Playground](https://play.golang.org/p/NqrUOfBmJtt))
+Make pipe-able unix applications with os.Stdin ([Golang Playground](https://play.golang.org/p/NqrUOfBmJtt))
 
 ```Shell
 go run pipe.go
@@ -451,7 +451,7 @@ List files in working directory
 go run explorer.go
 ```
 
-run assemply code from golang
+run assembly code from golang
 
 ```Shell
 go run assembly.go
@@ -580,6 +580,17 @@ Hash Map standard functions in golang
 ```Shell
 go run map.go
 ```
+
+### TinyGo
+
+You can even use Go on microcontrollers, the keyword here is [TinyGo](https://tinygo.org/), a go compiler specially developed for SBCs and MCUs.  
+If you want to blink the LED of your Raspberry Pi Pico, try this: 
+
+```Shell
+tinygo build -o firmware.uf2 -target=pico ./tinygo/blink.go
+```
+
+and then upload it to the pico.
 
 ## Compile
 
