@@ -1,5 +1,5 @@
 // Description: Securely store national ID numbers and support partial search using HMAC blind indexing with n-gram tokenization
-// Tags: hmac, blind-index, ngram, aes-gcm, encryption, database, search, security, privacy
+// Tags: hmac, blind-index, ngram, aes-gcm, encryption, database, search, security, privacy, kdf
 
 // Problem: How do you store sensitive national ID numbers and still support partial search?
 //
@@ -20,11 +20,33 @@
 //	  - Look up tokens in the blind index table
 //	  - Decrypt matched records to return plaintext results
 //
-//	Security properties:
-//	  - The blind index leaks only approximate structure (n-gram frequency),
-//	    not the plaintext ID — as long as the HMAC key stays secret.
-//	  - Two separate keys: one for encryption, one for HMAC. Compromise of
-//	    one key does not compromise the other.
+// Real-world key management flow:
+//
+//  1. Generate a single master key once (keep it secret, never commit it):
+//       openssl rand -hex 32
+//
+//  2. Store it in .env (local dev) or a secrets manager (production):
+//       APP_SECRET_KEY=a3f1... (64 hex chars = 32 bytes)
+//
+//  3. On app startup, load the master key and DERIVE separate subkeys
+//     for each purpose using a KDF (Key Derivation Function).
+//     Never use the raw master key directly for encryption or HMAC.
+//     Never reuse the same key for two different purposes.
+//
+//  4. The derived keys are ephemeral — they live only in memory.
+//     Only APP_SECRET_KEY ever touches disk/env.
+//
+// Why key derivation (KDF) instead of two env vars?
+//   - One secret to manage, rotate, and audit.
+//   - The context string guarantees the two subkeys are cryptographically
+//     independent: learning encKey tells you nothing about hmacKey.
+//   - deriveKey below is a simplified HKDF-Expand (RFC 5869).
+//     For production, use golang.org/x/crypto/hkdf for the full spec.
+//
+// Security properties:
+//   - The blind index leaks only approximate structure (n-gram frequency),
+//     not the plaintext ID — as long as the HMAC key stays secret.
+//   - Compromise of encKey does not compromise hmacKey, and vice versa.
 package main
 
 import (
@@ -37,6 +59,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"os"
 )
 
 const (
@@ -92,6 +115,47 @@ func decrypt(key, ciphertext, nonce []byte) string {
 	}
 
 	return string(plaintext)
+}
+
+// loadMasterKey reads APP_SECRET_KEY from the environment.
+// It expects a 64-character hex string (32 bytes).
+// If not set, it prints a setup hint and exits — fail fast at startup,
+// never silently fall back to a weak or hardcoded key.
+func loadMasterKey() []byte {
+	raw := os.Getenv("APP_SECRET_KEY")
+	if raw == "" {
+		fmt.Fprintln(os.Stderr, "APP_SECRET_KEY is not set.")
+		fmt.Fprintln(os.Stderr, "Generate one with:")
+		fmt.Fprintln(os.Stderr, "  openssl rand -hex 32")
+		fmt.Fprintln(os.Stderr, "Then export it or add to .env:")
+		fmt.Fprintln(os.Stderr, "  APP_SECRET_KEY=<output above>")
+		fmt.Fprintln(os.Stderr, "Run the demo:")
+		fmt.Fprintln(os.Stderr, "  APP_SECRET_KEY=$(openssl rand -hex 32) go run advanced/hmac_blind_index.go")
+		os.Exit(1)
+	}
+	key, err := hex.DecodeString(raw)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "invalid APP_SECRET_KEY (expected hex): %v\n", err)
+		os.Exit(1)
+	}
+	if len(key) != 32 {
+		fmt.Fprintln(os.Stderr, "APP_SECRET_KEY must be exactly 32 bytes (64 hex chars)")
+		os.Exit(1)
+	}
+	return key
+}
+
+// deriveKey derives a purpose-specific subkey from the master key.
+// The context string MUST be unique per use case — it is the only thing
+// that separates encKey from hmacKey when both come from the same master.
+//
+// Internally this is HMAC-SHA256(masterKey, context), which is equivalent
+// to the HKDF-Expand step (RFC 5869) for a single 32-byte output block.
+// For outputs longer than 32 bytes use golang.org/x/crypto/hkdf instead.
+func deriveKey(masterKey []byte, context string) []byte {
+	mac := hmac.New(sha256.New, masterKey)
+	mac.Write([]byte(context))
+	return mac.Sum(nil) // 32 bytes — perfect for AES-256 and HMAC-SHA256
 }
 
 // blindToken computes HMAC-SHA256 of value using the provided HMAC key.
@@ -178,16 +242,22 @@ func decryptRecord(encKey []byte, r Record) string {
 }
 
 func main() {
-	// Generate two independent 256-bit keys.
-	// In production load these from a KMS (AWS KMS, HashiCorp Vault, etc.).
-	encKey := make([]byte, 32)
-	hmacKey := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, encKey); err != nil {
-		panic(err)
-	}
-	if _, err := io.ReadFull(rand.Reader, hmacKey); err != nil {
-		panic(err)
-	}
+	// Step 1: Load the single master key from the environment.
+	//   Local dev:   source .env && go run ...
+	//   Docker:      env_file: [.env] in docker-compose.yml
+	//   Kubernetes:  envFrom: secretRef in the pod spec
+	//   AWS/GCP:     inject via Secrets Manager / Secret Manager at deploy time
+	masterKey := loadMasterKey()
+
+	// Step 2: Derive purpose-specific subkeys. Only these derived keys are
+	// used for actual crypto operations — masterKey stays in memory only
+	// for this derivation step.
+	encKey := deriveKey(masterKey, "national-id:encryption:v1")
+	hmacKey := deriveKey(masterKey, "national-id:blind-index:v1")
+	// The ":v1" suffix lets you version keys — bump to ":v2" during rotation
+	// and re-encrypt records in a background migration job.
+	fmt.Printf("Keys derived from APP_SECRET_KEY  encKey=%x...  hmacKey=%x...\n\n",
+		encKey[:4], hmacKey[:4])
 
 	// Sample Thai national IDs (13 digits). The same pattern applies to any
 	// ID format: passport numbers, SSNs, driving licence numbers, etc.
