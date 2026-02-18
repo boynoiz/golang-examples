@@ -47,6 +47,24 @@
 //   - The blind index leaks only approximate structure (n-gram frequency),
 //     not the plaintext ID — as long as the HMAC key stays secret.
 //   - Compromise of encKey does not compromise hmacKey, and vice versa.
+//
+// Complexity:
+//
+//	N-gram generation (per record):
+//	  O(L²) general case — L = ID length, iterating all substring lengths.
+//	  O(1)  fixed-length IDs (e.g. Thai 13-digit ID always produces 51 tokens).
+//
+//	Search — this code (in-memory linear scan):
+//	  O(N × K)  →  effectively O(N)
+//	  N = number of records, K = tokens per record (constant for fixed-length IDs).
+//
+//	Search — production database with an index on the token column:
+//	  O(log N)  with a B-tree index  (PostgreSQL/MySQL default)
+//	  O(1) avg  with a hash index
+//	  e.g. CREATE INDEX idx_blind_tokens ON national_id_tokens(token);
+//	       SELECT user_id FROM national_id_tokens WHERE token = $1;
+//	  This is why blind tokens belong in a separate indexed child table,
+//	  not stored as a JSON array or concatenated string in a single column.
 package main
 
 import (
